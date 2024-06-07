@@ -1,24 +1,44 @@
 const Mongoose = require('mongoose');
 const User = require('../models/users');
-const Bcrypt = require('bcryptjs');
+const bcrypt = require('bcryptjs')
 const jwt = require('jsonwebtoken');
+const { ValidationError, NotFoundError } = require('../../helper/error');
 
 // create new user
-exports.createUser = async (request, response) => {
+exports.createUser = async (request, response , next) => {
     //check if user already exists in the database by email
     let userEmail = await User.findOne({ email: request.body.email });
 
     if (userEmail) {
-        return response.status(400).json({ success: false, message: `User already exists in the database with this email ${userEmail.email}` });
+        throw new ValidationError(`User already exists in the database with this email ${userEmail.email}`);
     }
 
     //create a new user if the email does not exist
     try {
         let { name, email, password } = request.body;
-        password = Bcrypt.hashSync(request.body.password, 10)
-        let newUser = new User({name, email, password});
+
+        // validate user input
+        if (!name) {
+            throw new ValidationError('name is required');
+        }
+        if (!email) {
+            throw new ValidationError('email is required');
+        }
+        if (!password) {
+            throw new ValidationError('password is required');
+        }
+        // hash password
+        password = bcrypt.hashSync(request.body.password, 10)
+
+        let newUser = new User({
+            name,
+            email,
+            password
+        });
         let savedUser = await newUser.save();
+
         savedUser = savedUser.toJSON();
+
         delete savedUser.password;
         //create user payload
         const userPayLoad = {
@@ -30,24 +50,25 @@ exports.createUser = async (request, response) => {
         // return user token
         return response.status(200).json({ success: true, message: `User  saved successfully`, user: savedUser, token: userToken })
     } catch (error) {
-        return response.status(500).json({ success: false, message: `Unable to save user ${savedUser.name}`, error });
+        next(error);
     }
 
 
 }
 
-exports.editUser = async (request, response) => {
+exports.editUser = async (request, response ,next) => {
     try {
         // get user id
         let user_id = request.params.id;
-        if (!Mongoose.isValidObjectId(user_id)) return response.status(422).json({ success: false, message: `No User with id ${user_id}` });
+        if (!Mongoose.isValidObjectId(user_id)) 
+        throw new ValidationError(`Invalid user id ${user_id}`)
 
         // find user with given id
         let updatedUser = await User.findByIdAndUpdate(user_id, request.body, { new: true });
         return response.status(200).json({ success: true, message: updatedUser });
 
     } catch (error) {
-        return response.status(500).json({ success: false, message: `Unable to update user with id ${user_id}` }, error);
+        next(error)
     }
 
 }
@@ -78,27 +99,31 @@ exports.getAllUsers = async (request, response) => {
 }
 
 //login user
-exports.login = async (request, response) =>{
+exports.login = async (request, response , next) => {
     // validate inputs
     const { email, password } = request.body;
-    if (!email ||!password) {
-        return response.status(400).json({ success: false, message: 'Please provide email and password' });
+    if (!email) {
+        throw new ValidationError('Please provide email');
+    }
+    if(!password){
+        throw new ValidationError('please provide password ')
     }
 
     // find user by email
-    let user = await User.findOne({ email: email }).select("-password");
+    let user = await User.findOne({ email: email });
+    console.log(user)
     if (!user) {
-        return response.status(400).json({ success: false, message: `No user found with email ${email}` });
+        throw new NotFoundError(`No user found with email`);
     }
 
     // check if password matches
-    const isMatch = Bcrypt.compareSync(request.body.password, user.password);
+    const isMatch = bcrypt.compareSync(request.body.password, user.password);
     if (!isMatch) {
-        return response.status(400).json({ success: false, message: `Password does not match` });
+        throw new ValidationError(`Password does not match`);
     }
 
-    
- 
+
+
     // create  user payload
     const userPayLoad = {
         name: user.name,
@@ -112,7 +137,7 @@ exports.login = async (request, response) =>{
 }
 
 // delete user account
-exports.deleteUser = async (request, response) => {
+exports.deleteUser = async (request, response , next) => {
     try {
         // get user id
         let user_id = request.params.id;
@@ -123,6 +148,6 @@ exports.deleteUser = async (request, response) => {
         return response.status(200).json({ success: true, message: deletedUser });
 
     } catch (error) {
-        return response.status(500).json({ success: false, message: `Unable to delete user with id ${user_id}` }, error);
+        next(error);
     }
 }
